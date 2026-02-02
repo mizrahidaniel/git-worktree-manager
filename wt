@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="0.1.0"
+WORKTREE_BASE="${WORKTREE_BASE:-../}"
+
+cmd_list() {
+    echo "📂 Worktrees:"
+    git worktree list | while IFS= read -r line; do
+        path=$(echo "$line" | awk '{print $1}')
+        branch=$(echo "$line" | grep -oP '\[\K[^\]]+' || echo "detached")
+        if [[ "$path" == "$(git rev-parse --show-toplevel)" ]]; then
+            echo "  → $branch (main checkout)"
+        else
+            echo "  → $branch ($path)"
+        fi
+    done
+}
+
+cmd_add() {
+    local branch="${1:-}"
+    if [[ -z "$branch" ]]; then
+        echo "❌ Error: branch name required"
+        echo "Usage: wt add <branch>"
+        exit 1
+    fi
+    
+    local worktree_path="$WORKTREE_BASE/$branch"
+    
+    if [[ -d "$worktree_path" ]]; then
+        echo "❌ Error: worktree already exists at $worktree_path"
+        exit 1
+    fi
+    
+    echo "🌱 Creating worktree for branch '$branch'..."
+    
+    # Check if branch exists remotely or locally
+    if git show-ref --verify --quiet "refs/heads/$branch"; then
+        # Local branch exists
+        git worktree add "$worktree_path" "$branch"
+    elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+        # Remote branch exists
+        git worktree add "$worktree_path" -b "$branch" "origin/$branch"
+    else
+        # New branch
+        git worktree add "$worktree_path" -b "$branch"
+    fi
+    
+    echo "✅ Worktree created at: $worktree_path"
+}
+
+cmd_remove() {
+    local branch="${1:-}"
+    if [[ -z "$branch" ]]; then
+        echo "❌ Error: branch name required"
+        echo "Usage: wt remove <branch>"
+        exit 1
+    fi
+    
+    local worktree_path="$WORKTREE_BASE/$branch"
+    
+    if [[ ! -d "$worktree_path" ]]; then
+        echo "❌ Error: worktree not found at $worktree_path"
+        exit 1
+    fi
+    
+    echo "🗑️  Removing worktree for branch '$branch'..."
+    git worktree remove "$worktree_path"
+    echo "✅ Worktree removed"
+}
+
+cmd_prune() {
+    echo "🧹 Pruning stale worktree references..."
+    git worktree prune -v
+    echo "✅ Done"
+}
+
+cmd_help() {
+    cat <<EOF
+wt - Git Worktree Manager v$VERSION
+
+A friendly wrapper around git worktree commands.
+
+USAGE:
+    wt <command> [options]
+
+COMMANDS:
+    list                List all worktrees
+    add <branch>        Create a new worktree for a branch
+    remove <branch>     Remove a worktree
+    prune               Clean up stale worktree references
+    help                Show this help message
+
+EXAMPLES:
+    wt list
+    wt add feature/new-api
+    wt remove feature/old-stuff
+    wt prune
+
+ENVIRONMENT:
+    WORKTREE_BASE       Base directory for worktrees (default: ../)
+
+EOF
+}
+
+main() {
+    local cmd="${1:-help}"
+    
+    case "$cmd" in
+        list|ls)
+            cmd_list
+            ;;
+        add|new)
+            shift
+            cmd_add "$@"
+            ;;
+        remove|rm|delete)
+            shift
+            cmd_remove "$@"
+            ;;
+        prune|clean)
+            cmd_prune
+            ;;
+        help|-h|--help)
+            cmd_help
+            ;;
+        --version|-v)
+            echo "wt version $VERSION"
+            ;;
+        *)
+            echo "❌ Unknown command: $cmd"
+            echo "Run 'wt help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
